@@ -604,7 +604,7 @@ class Serial(SerialBase, PlatformSpecific):
                         '(device disconnected or multiple access on port?)')
                 read.extend(buf)
 
-            if timeout.expired():
+            if timeout.expired() or self._inter_byte_timeout is not None:
                 break
         return bytes(read)
 
@@ -839,8 +839,7 @@ class PosixPollSerial(Serial):
                     break
                 buf = os.read(self.fd, size - len(read))
                 read.extend(buf)
-                if timeout.expired() \
-                        or (self._inter_byte_timeout is not None and self._inter_byte_timeout > 0) and not buf:
+                if timeout.expired() or (self._inter_byte_timeout is not None and not buf):
                     break   # early abort on timeout
         return bytes(read)
 
@@ -896,11 +895,17 @@ class VTIMESerial(Serial):
         if not self.is_open:
             raise PortNotOpenError()
         read = bytearray()
-        while len(read) < size:
-            buf = os.read(self.fd, size - len(read))
-            if not buf:
-                break
-            read.extend(buf)
+        buf = os.read(self.fd, size - len(read))
+        # read should always return some data as select reported it was
+        # ready to read when we get to this point.
+        if not buf:
+            # Disconnected devices, at least on Linux, show the
+            # behavior that they are always ready to read immediately
+            # but reading returns nothing.
+            raise SerialException(
+                'device reports readiness to read but returned no data '
+                '(device disconnected or multiple access on port?)')
+        read.extend(buf)
         return bytes(read)
 
     # hack to make hasattr return false
